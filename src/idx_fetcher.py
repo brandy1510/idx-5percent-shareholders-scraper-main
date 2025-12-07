@@ -1,6 +1,6 @@
 import io
 from datetime import datetime, timedelta
-import cloudscraper
+from curl_cffi import requests
 
 BASE_URL = "https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
 
@@ -8,25 +8,9 @@ def fetch_idx_pdf(exact_date=None):
     """
     Fetch IDX announcements filtered by 'Pemegang Saham di atas 5%' 
     and return the attachment content as BytesIO.
-
-    Parameters
-    ----------
-    exact_date : str | None
-        If None -> fetch latest with _lamp.
-        If given -> fetch only _lamp file that matches the exact date (YYYYMMDD).
-
-    Returns
-    -------
-    dict
-        {
-            'title', 'announcementDate', 'attachmentUrl',
-            'fileName', 'pdf_content' (BytesIO)
-        }
-
-    Raises
-    ------
-    ValueError
-        If no data found or no '_lamp' file found.
+    
+    Uses curl_cffi to impersonate a real browser (TLS Fingerprint) 
+    to bypass strict WAF blocking in Datacenters.
     """
 
     today_str = datetime.today().strftime("%Y%m%d")
@@ -60,28 +44,29 @@ def fetch_idx_pdf(exact_date=None):
             "keyword": "Pemegang Saham di atas 5%"
         }
 
-    # === Fetch data with cloudscraper ===
-    # Use a specific browser signature to bypass WAF blocking in Datacenters (GCF)
-    scraper = cloudscraper.create_scraper(
-        browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'desktop': True
-        }
-    )
-    # Add standard headers to mimic a real user usage
-    scraper.headers.update({
-        "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
-        "Origin": "https://www.idx.co.id",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "X-Requested-With": "XMLHttpRequest"
-    })
+    # === Fetch data with curl_cffi (J3 Fingerprint Impersonation) ===
+    # Using 'chrome110' impersonation to match recent browser TLS signatures
+    print(f"[INFO] Fetching from: {BASE_URL} with params: {params} (using curl_cffi)")
     
-    print(f"[INFO] Fetching from: {BASE_URL} with params: {params}")
-    response = scraper.get(BASE_URL, params=params)
-    response.raise_for_status()
+    try:
+        response = requests.get(
+            BASE_URL, 
+            params=params, 
+            impersonate="chrome110",
+            headers={
+                "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
+                "Origin": "https://www.idx.co.id",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        data = response.json().get("Replies", [])
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch IDX data (WAF Blocked?): {e}")
 
-    data = response.json().get("Replies", [])
     if not data:
         raise ValueError("No announcements found for the given parameters")
 
@@ -113,7 +98,9 @@ def fetch_idx_pdf(exact_date=None):
             # --- Download logic (In-Memory) ---
             print(f"[INFO] Downloading {file_name} ...")
             pdf_url = attachment["FullSavePath"]
-            pdf_data = scraper.get(pdf_url)
+            
+            # Download PDF using the same session/impersonation
+            pdf_data = requests.get(pdf_url, impersonate="chrome110", timeout=60)
             pdf_data.raise_for_status()
             
             # Create BytesIO object
