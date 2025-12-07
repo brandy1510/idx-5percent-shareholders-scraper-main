@@ -2,12 +2,12 @@ import os
 import sys
 import functions_framework
 from datetime import datetime, timedelta
-from idx_fetcher import fetch_idx_pdf
-from pdf_parser import parse_shareholder_pdf
+from src.idx_fetcher import fetch_idx_pdf
+from src.pdf_parser import parse_shareholder_pdf
 
 # Try to import GCS uploader
 try:
-    from gcs_uploader import upload_to_gcs
+    from src.gcs_uploader import upload_to_gcs
     GCS_AVAILABLE = True
 except ImportError:
     GCS_AVAILABLE = False
