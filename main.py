@@ -12,6 +12,13 @@ try:
 except ImportError:
     GCS_AVAILABLE = False
 
+# Load .env for local testing (silent failure if missing)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 def get_target_date():
     """
@@ -39,9 +46,9 @@ def run_etl(force_date=None):
     print("Starting IDX Shareholder ETL (GCF)...")
     
     # Config
-    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "altrabyte-dev-data-01")
-    bucket_name = os.environ.get("BUCKET_NAME", "data-dev-01")
-    base_prefix = "stock_market/data_kepentingan"
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    bucket_name = os.environ.get("BUCKET_NAME")
+    base_prefix = os.environ.get("GCS_BASE_PREFIX", "shareholder_data")
     
     try:
         if force_date:
@@ -78,7 +85,7 @@ def run_etl(force_date=None):
         
         full_csv_str = full_df.to_csv(index=False)
         
-        if GCS_AVAILABLE:
+        if GCS_AVAILABLE and bucket_name:
             print(f"Uploading to GCS Bucket: {bucket_name}")
             
             # Upload Full Data (Raw) matches the main table definition

@@ -31,8 +31,9 @@ A Google Cloud Function (GCF) ETL pipeline that fetches "5% Shareholder" disclos
 
 Set the following Environment Variables in GCF or your local `.env`:
 
--   `BUCKET_NAME`: Target GCS bucket (Default: `data-dev-01`)
--   `GOOGLE_CLOUD_PROJECT`: Google Cloud Project ID (Default: `altrabyte-dev-data-01`)
+-   `BUCKET_NAME`: Target GCS bucket (e.g., `my-data-bucket`)
+-   `GOOGLE_CLOUD_PROJECT`: Google Cloud Project ID (e.g., `my-project-id`)
+-   `GCS_BASE_PREFIX`: Path prefix in bucket (e.g., `folder/subfolder`)
 
 ## Deployment to Google Cloud Functions
 
@@ -59,9 +60,28 @@ python test_runner.py parse --file downloads/myfile.pdf
 
 ### 3. Full End-to-End Test
 Runs the GCF logic locally (Fetch -> Parse -> Upload).
+
+**Note**: By default, this saves to `results/` if no bucket is configured.
+To test GCS upload locally, set the environment variables before running:
 ```bash
+# Windows PowerShell
+$env:BUCKET_NAME="data-dev-01"
+$env:GOOGLE_CLOUD_PROJECT="altrabyte-dev-data-01"
+python test_runner.py full
+
+# Linux/Mac
+export BUCKET_NAME="data-dev-01"
+export GOOGLE_CLOUD_PROJECT="altrabyte-dev-data-01"
 python test_runner.py full
 ```
+
+**Alternative (.env)**
+You can also create a `.env` file in the root directory (already gitignored):
+```
+BUCKET_NAME=data-dev-01
+GOOGLE_CLOUD_PROJECT=altrabyte-dev-data-01
+```
+The script will automatically load these if present.
 
 ### 4. Backfill / Historical Re-Scrape
 Runs a multi-threaded backfill for a date range.
