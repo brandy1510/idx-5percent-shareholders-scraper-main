@@ -39,6 +39,7 @@ def run_etl():
     print("Starting IDX Shareholder ETL (GCF)...")
     
     # Config
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "altrabyte-dev-data-01")
     bucket_name = os.environ.get("BUCKET_NAME", "data-dev-01")
     base_prefix = "stock_market/data_kepentingan"
     
@@ -63,17 +64,15 @@ def run_etl():
         
         # 2. Parse PDF
         print("Parsing PDF...")
-        full_df, filtered_df = parse_shareholder_pdf(pdf_content)
+        full_df = parse_shareholder_pdf(pdf_content)
         
-        if full_df.empty and filtered_df.empty:
+        if full_df.empty:
             return "No data found."
 
         # 3. Save / Upload
         csv_full = base_filename + "_full.csv"
-        csv_filtered = base_filename + ".csv"
         
         full_csv_str = full_df.to_csv(index=False)
-        filtered_csv_str = filtered_df.to_csv(index=False)
         
         if GCS_AVAILABLE:
             print(f"Uploading to GCS Bucket: {bucket_name}")
@@ -81,12 +80,7 @@ def run_etl():
             # Upload Full Data (Raw) matches the main table definition
             # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
             blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
-            upload_to_gcs(bucket_name, blob_name_full, full_csv_str)
-            
-            # Upload Filtered Data (Changes Only) to a variant path
-            # Path: stock_market/data_kepentingan_changes/dt=YYYY-MM-DD/filename.csv
-            blob_name_filtered = f"stock_market/data_kepentingan_changes/{hive_partition}/{csv_filtered}"
-            upload_to_gcs(bucket_name, blob_name_filtered, filtered_csv_str)
+            upload_to_gcs(bucket_name, blob_name_full, full_csv_str, project_id=project_id)
             
         else:
             # Fallback for local testing or if GCS unavailable
@@ -96,12 +90,10 @@ def run_etl():
             
             with open(os.path.join(local_dir, csv_full), "w", encoding="utf-8") as f:
                 f.write(full_csv_str)
-            with open(os.path.join(local_dir, csv_filtered), "w", encoding="utf-8") as f:
-                f.write(filtered_csv_str)
                 
             print(f"[INFO] No bucket configured or GCS unavailable. Saved to {local_dir}")
 
-        return f"Success. Processed {original_filename}. Full: {len(full_df)}, Filtered: {len(filtered_df)}"
+        return f"Success. Processed {original_filename}. Rows: {len(full_df)}"
         
     except ValueError as ve:
         error_msg = f"No data found: {ve}"

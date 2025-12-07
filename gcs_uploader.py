@@ -1,7 +1,7 @@
 from google.cloud import storage
 import os
 
-def upload_to_gcs(bucket_name, blob_name, data, content_type="text/csv"):
+def upload_to_gcs(bucket_name, blob_name, data, content_type="text/csv", project_id=None):
     """
     Uploads data to a Google Cloud Storage bucket.
     
@@ -10,9 +10,10 @@ def upload_to_gcs(bucket_name, blob_name, data, content_type="text/csv"):
         blob_name (str): Destination path in the bucket.
         data (str or bytes): Data to upload.
         content_type (str): Content type of the file.
+        project_id (str): Optional Google Cloud Project ID.
     """
     try:
-        storage_client = storage.Client()
+        storage_client = storage.Client(project=project_id) if project_id else storage.Client()
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(blob_name)
         
