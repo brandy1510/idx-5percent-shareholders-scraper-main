@@ -1,7 +1,10 @@
 import io
 import os
+import urllib.parse
 from datetime import datetime, timedelta
 from curl_cffi import requests
+# Fallback to standard requests for ScraperAPI to avoid confusion, 
+# but curl_cffi acts as drop-in. We'll use curl_cffi's requests for consistency.
 
 BASE_URL = "https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
 
@@ -45,38 +48,62 @@ def fetch_idx_pdf(exact_date=None):
             "keyword": "Pemegang Saham di atas 5%"
         }
 
-    # === Fetch data with curl_cffi (J3 Fingerprint Impersonation) ===
-    # Using 'chrome110' impersonation to match recent browser TLS signatures
-    proxy_url = os.environ.get("PROXY_URL")
-    if proxy_url and not proxy_url.startswith(("http://", "https://")):
-        proxy_url = f"http://{proxy_url}"
-
-    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    # === Fetch data ===
+    scraperapi_key = os.environ.get("SCRAPERAPI_KEY")
     
-    if proxy_url:
-        print(f"[INFO] Using Proxy: {proxy_url}")
-    
-    print(f"[INFO] Fetching from: {BASE_URL} with params: {params} (using curl_cffi)")
-    
-    try:
-        response = requests.get(
-            BASE_URL, 
-            params=params, 
-            proxies=proxies,
-            impersonate="chrome110",
-            headers={
-                "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
-                "Origin": "https://www.idx.co.id",
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "X-Requested-With": "XMLHttpRequest"
-            },
-            timeout=30
-        )
-        response.raise_for_status()
+    if scraperapi_key:
+        print(f"[INFO] Using ScraperAPI...")
+        # Construct full target URL with params manually for the 'url' param
+        query_string = urllib.parse.urlencode(params)
+        target_url = f"{BASE_URL}?{query_string}"
         
-        data = response.json().get("Replies", [])
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch IDX data (WAF Blocked?): {e}")
+        payload = {
+            'api_key': scraperapi_key, 
+            'url': target_url
+        }
+        
+        try:
+            # We can use curl_cffi requests as standard requests here
+            response = requests.get('https://api.scraperapi.com/', params=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json().get("Replies", [])
+        except Exception as e:
+            raise RuntimeError(f"ScraperAPI Failed: {e}")
+            
+    else:
+        # Fallback to direct connection / Proxy / TLS Impersonation
+        # === Fetch data with curl_cffi (J3 Fingerprint Impersonation) ===
+        # Using 'chrome110' impersonation to match recent browser TLS signatures
+        proxy_url = os.environ.get("PROXY_URL")
+        if proxy_url and not proxy_url.startswith(("http://", "https://")):
+            proxy_url = f"http://{proxy_url}"
+    
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        
+        if proxy_url:
+            print(f"[INFO] Using Proxy: {proxy_url}")
+        
+        print(f"[INFO] Fetching from: {BASE_URL} with params: {params} (using curl_cffi)")
+        
+        try:
+            response = requests.get(
+                BASE_URL, 
+                params=params, 
+                proxies=proxies,
+                impersonate="chrome110",
+                headers={
+                    "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
+                    "Origin": "https://www.idx.co.id",
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            data = response.json().get("Replies", [])
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch IDX data (WAF Blocked?): {e}")
 
     if not data:
         raise ValueError("No announcements found for the given parameters")
@@ -110,8 +137,18 @@ def fetch_idx_pdf(exact_date=None):
             print(f"[INFO] Downloading {file_name} ...")
             pdf_url = attachment["FullSavePath"]
             
-            # Download PDF using the same session/impersonation
-            pdf_data = requests.get(pdf_url, proxies=proxies, impersonate="chrome110", timeout=60)
+            # Download PDF
+            if scraperapi_key:
+                print(f"[INFO] Downloading via ScraperAPI...")
+                payload_pdf = {
+                    'api_key': scraperapi_key, 
+                    'url': pdf_url
+                }
+                pdf_data = requests.get('https://api.scraperapi.com/', params=payload_pdf, timeout=120)
+            else:
+                # Direct / Proxy download using the same session/impersonation
+                pdf_data = requests.get(pdf_url, proxies=proxies, impersonate="chrome110", timeout=60)
+            
             pdf_data.raise_for_status()
             
             # Create BytesIO object

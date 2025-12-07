@@ -35,6 +35,7 @@ Set the following Environment Variables in GCF or your local `.env`:
 -   `GOOGLE_CLOUD_PROJECT`: Google Cloud Project ID (e.g., `my-project-id`)
 -   `GCS_BASE_PREFIX`: Path prefix in bucket (e.g., `folder/subfolder`)
 -   `PROXY_URL` (Optional): HTTP/HTTPS proxy URL (e.g., `http://user:pass@host:port`) to bypass IP blocking.
+-   `SCRAPERAPI_KEY` (Optional): API Key for ScraperAPI (replaces Proxy/TLS logic if set).
 
 ## Deployment to Google Cloud Functions
 
