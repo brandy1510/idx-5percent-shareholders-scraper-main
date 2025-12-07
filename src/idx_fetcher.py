@@ -34,7 +34,7 @@ def fetch_idx_pdf(exact_date=None):
         }
     else:
         dt_from = datetime.strptime(exact_date, "%Y%m%d")
-        dt_to = dt_from + timedelta(days=7)  # add 7 days
+        dt_to = dt_from # Exact date means single day
         date_to = dt_to.strftime("%Y%m%d")
 
         params = {

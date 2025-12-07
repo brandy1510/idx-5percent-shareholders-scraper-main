@@ -42,6 +42,9 @@ Set the following Environment Variables in GCF or your local `.env`:
 Deploy using the following settings:
 -   **Runtime**: Python 3.13 (or compatible)
 -   **Entry Point**: `idx_scraper_entry`
+-   **Memory**: **1 GB** (Minimum) or **2 GB** (Recommended)
+    -   *Why?* PDF parsing (`pdfplumber`) is memory-intensive for files with many pages. 512MB is insufficient.
+-   **Timeout**: 300s (5 minutes)
 -   **Source**: Upload this directory.
 
 ## Local Testing & Development
