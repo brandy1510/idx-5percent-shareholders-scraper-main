@@ -65,21 +65,22 @@ Runs the GCF logic locally (Fetch -> Parse -> Upload).
 To test GCS upload locally, set the environment variables before running:
 ```bash
 # Windows PowerShell
-$env:BUCKET_NAME="data-dev-01"
-$env:GOOGLE_CLOUD_PROJECT="altrabyte-dev-data-01"
+$env:BUCKET_NAME="my-data-bucket"
+$env:GOOGLE_CLOUD_PROJECT="my-project-id"
 python test_runner.py full
 
 # Linux/Mac
-export BUCKET_NAME="data-dev-01"
-export GOOGLE_CLOUD_PROJECT="altrabyte-dev-data-01"
+export BUCKET_NAME="my-data-bucket"
+export GOOGLE_CLOUD_PROJECT="my-project-id"
 python test_runner.py full
 ```
 
 **Alternative (.env)**
 You can also create a `.env` file in the root directory (already gitignored):
 ```
-BUCKET_NAME=data-dev-01
-GOOGLE_CLOUD_PROJECT=altrabyte-dev-data-01
+BUCKET_NAME=my-data-bucket
+GOOGLE_CLOUD_PROJECT=my-project-id
+GCS_BASE_PREFIX=stock_market/data_kepentingan
 ```
 The script will automatically load these if present.
 
