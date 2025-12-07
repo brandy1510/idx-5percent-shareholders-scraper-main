@@ -61,7 +61,23 @@ def fetch_idx_pdf(exact_date=None):
         }
 
     # === Fetch data with cloudscraper ===
-    scraper = cloudscraper.create_scraper()
+    # Use a specific browser signature to bypass WAF blocking in Datacenters (GCF)
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        }
+    )
+    # Add standard headers to mimic a real user usage
+    scraper.headers.update({
+        "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
+        "Origin": "https://www.idx.co.id",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest"
+    })
+    
+    print(f"[INFO] Fetching from: {BASE_URL} with params: {params}")
     response = scraper.get(BASE_URL, params=params)
     response.raise_for_status()
 
