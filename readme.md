@@ -90,6 +90,7 @@ Runs a multi-threaded backfill for a date range.
 # Max 3 threads
 python test_runner.py backfill --start_date 20250101 --end_date 20250131
 ```
+**Tip**: Since this runs in memory, check your **Google Cloud Storage Bucket** (`stock_market/data_kepentingan/`) to watch the files arrive in real-time.
 
 ## Credits
 
