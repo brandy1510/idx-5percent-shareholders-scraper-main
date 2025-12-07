@@ -8,20 +8,17 @@ RESULT_DIR = "results"
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 
-def parse_shareholder_pdf(pdf_file, output_filename: str, log_callback=None) -> pd.DataFrame:
+def parse_shareholder_pdf(pdf_file, log_callback=None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Parse a shareholder ownership PDF from IDX (Pemegang Saham di atas 5%) and
     return a cleaned DataFrame containing relevant information.
 
     Args:
         pdf_file: File-like object (BytesIO) or path to PDF
-        output_filename (str): Name of the output CSV file (including .csv extension)
 
     Returns:
-        pd.DataFrame: Filtered DataFrame of affected emitens
+        tuple[pd.DataFrame, pd.DataFrame]: (full_df, filtered_df)
     """
-
-    csv_path = os.path.join(RESULT_DIR, output_filename)
 
     # --- Parse PDF ---
     all_rows = []
@@ -100,20 +97,12 @@ def parse_shareholder_pdf(pdf_file, output_filename: str, log_callback=None) -> 
     df[prev_col] = pd.to_numeric(df[prev_col], errors="coerce").fillna(0)
     df[curr_col] = pd.to_numeric(df[curr_col], errors="coerce").fillna(0)
 
-    # Save Full CSV (Raw Data)
-    full_csv_path = csv_path.replace(".csv", "_full.csv")
-    df.to_csv(full_csv_path, index=False)
-    print(f"[SUCCESS] Saved FULL data to {full_csv_path} ({len(df)} rows)")
-
     # Compare percentages
     affected_emiten = df.loc[df[prev_col] !=
                              df[curr_col], "Kode Efek"].unique()
 
     filtered_df = df[df["Kode Efek"].isin(affected_emiten)]
 
-    # Save CSV for next time
-    filtered_df.to_csv(csv_path, index=False)
-    print(f"[SUCCESS] Parsed and saved FILTERED CSV to {csv_path}")
-    print(f"Done. Found {len(filtered_df)} affected rows.")
+    print(f"[INFO] Parsed {len(df)} total rows, found {len(filtered_df)} affected rows.")
 
-    return filtered_df
+    return df, filtered_df
