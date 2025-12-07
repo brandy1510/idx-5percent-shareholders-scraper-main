@@ -35,7 +35,7 @@ def get_target_date():
     
     return target_date.strftime("%Y%m%d")
 
-def run_etl():
+def run_etl(force_date=None):
     print("Starting IDX Shareholder ETL (GCF)...")
     
     # Config
@@ -44,8 +44,12 @@ def run_etl():
     base_prefix = "stock_market/data_kepentingan"
     
     try:
-        target_date_str = get_target_date()
-        print(f"Target Date (YYYYMMDD): {target_date_str}")
+        if force_date:
+            target_date_str = force_date
+            print(f"Using Forced Target Date: {target_date_str}")
+        else:
+            target_date_str = get_target_date()
+            print(f"Target Date (YYYYMMDD): {target_date_str}")
         
         # Format date for Hive Partition (dt=YYYY-MM-DD)
         date_obj = datetime.strptime(target_date_str, "%Y%m%d")
