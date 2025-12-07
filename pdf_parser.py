@@ -60,7 +60,44 @@ def parse_shareholder_pdf(pdf_file, log_callback=None) -> tuple[pd.DataFrame, pd
 
             all_rows.extend(data)
 
+    # Create DataFrame
     df = pd.DataFrame(all_rows, columns=final_header)
+    
+    # --- Data Cleaning & Filling ---
+    # Replace empty strings and None with np.nan for correct filling
+    df.replace(["", None, "None"], np.nan, inplace=True)
+    
+    # Columns to forward fill
+    # "No" identifies the Shareholder group. "Nama Emiten" identifies the Company.
+    # "Nama Pemegang Saham" and "Kebangsaan" often missing in sub-rows.
+    # "Kode Efek" is reliable (User input), but other columns rely on "No" grouping
+    # Since "No" is only present on the first row of a group, we ffill it first.
+    cols_to_fill = ["No", "Nama Emiten", "Nama Pemegang Saham", "Kebangsaan"]
+    
+    # We forward fill. Grouping by 'Kode Efek' is safer to ensure we don't bleed across issuers,
+    # though strictly speaking the list is sequential.
+    # User suggestion: "column kode efek -> will always availble... use this as a group by key"
+    
+    # However, 'No' resets for each Issuer? No, 'No' usually increments strictly 1..N in the doc?
+    # Inspecting CSV: No 1 (AADI), No 2 (AADI), No 3 (AADI), No 4 (ABBA).
+    # So 'No' increments across issuers in the same file? Or resets?
+    # Actually, usually it resets per Issuer in some reports, or is global?
+    # In the sample: 1, 2, 3 for AADI. 4 for ABBA. It seems continuous!
+    # So Global ffill is actually safe for 'No'.
+    
+    # Let's simple ffill "No" first.
+    if "No" in df.columns:
+        df["No"] = df["No"].ffill()
+    
+    # Now for other columns, we can ffill grouped by 'No' to be very safe, 
+    # OR just global ffill assuming standard PDF table structure.
+    # Safe bet: Global ffill for Emiten/Name is fine because 'Kode Efek' changes when these change.
+    
+    for col in cols_to_fill:
+        if col in df.columns and col != "No":
+             df[col] = df[col].ffill()
+             
+    # Ensure percentages are numeric
     print(f"[INFO] Total rows extracted from PDF: {len(df)}")
 
     # Drop unnecessary columns

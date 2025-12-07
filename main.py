@@ -23,10 +23,13 @@ def get_target_date():
     today = datetime.now()
     weekday = today.weekday()
 
-    if weekday == 0:  # Monday
+    if weekday == 0:  # Monday -> Data from last Friday
         target_date = today - timedelta(days=3)
         print(f"Today is Monday. Fetching data for last Friday: {target_date.strftime('%Y-%m-%d')}")
-    else:
+    elif weekday == 6:  # Sunday -> Data from last Friday
+        target_date = today - timedelta(days=2)
+        print(f"Today is Sunday. Fetching data for last Friday: {target_date.strftime('%Y-%m-%d')}")
+    else:  # Tue-Sat -> Data from Yesterday (Mon-Fri)
         target_date = today - timedelta(days=1)
         print(f"Fetching data for Yesterday: {target_date.strftime('%Y-%m-%d')}")
     
