@@ -1,4 +1,5 @@
 import io
+import os
 from datetime import datetime, timedelta
 from curl_cffi import requests
 
@@ -46,12 +47,19 @@ def fetch_idx_pdf(exact_date=None):
 
     # === Fetch data with curl_cffi (J3 Fingerprint Impersonation) ===
     # Using 'chrome110' impersonation to match recent browser TLS signatures
+    proxy_url = os.environ.get("PROXY_URL")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    
+    if proxy_url:
+        print(f"[INFO] Using Proxy: {proxy_url}")
+    
     print(f"[INFO] Fetching from: {BASE_URL} with params: {params} (using curl_cffi)")
     
     try:
         response = requests.get(
             BASE_URL, 
             params=params, 
+            proxies=proxies,
             impersonate="chrome110",
             headers={
                 "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
@@ -100,7 +108,7 @@ def fetch_idx_pdf(exact_date=None):
             pdf_url = attachment["FullSavePath"]
             
             # Download PDF using the same session/impersonation
-            pdf_data = requests.get(pdf_url, impersonate="chrome110", timeout=60)
+            pdf_data = requests.get(pdf_url, proxies=proxies, impersonate="chrome110", timeout=60)
             pdf_data.raise_for_status()
             
             # Create BytesIO object

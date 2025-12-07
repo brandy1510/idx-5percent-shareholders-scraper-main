@@ -34,6 +34,7 @@ Set the following Environment Variables in GCF or your local `.env`:
 -   `BUCKET_NAME`: Target GCS bucket (e.g., `my-data-bucket`)
 -   `GOOGLE_CLOUD_PROJECT`: Google Cloud Project ID (e.g., `my-project-id`)
 -   `GCS_BASE_PREFIX`: Path prefix in bucket (e.g., `folder/subfolder`)
+-   `PROXY_URL` (Optional): HTTP/HTTPS proxy URL (e.g., `http://user:pass@host:port`) to bypass IP blocking.
 
 ## Deployment to Google Cloud Functions
 
