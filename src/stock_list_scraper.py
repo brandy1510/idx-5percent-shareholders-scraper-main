@@ -121,7 +121,8 @@ def save_to_file(data):
     filename = "data/idx_stock_list.json"
     
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        for record in data:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
         
     print(f"[INFO] Data saved to {filename}")
 

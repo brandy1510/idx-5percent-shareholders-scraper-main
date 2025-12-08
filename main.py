@@ -125,7 +125,9 @@ def run_etl(force_date=None):
         
         if stock_list_data:
             import json
-            stock_json_str = json.dumps(stock_list_data, indent=2, ensure_ascii=False)
+            # Convert to NDJSON (Newline Delimited JSON)
+            # Dump each dict to a string, then join with newlines
+            stock_json_str = "\n".join([json.dumps(record, ensure_ascii=False) for record in stock_list_data])
             
             # Use config for prefix
             stock_data_prefix = os.environ.get("STOCK_DATA_PREFIX", "stock_market/data_emiten")
@@ -140,7 +142,7 @@ def run_etl(force_date=None):
                 stock_blob_path,
                 bucket_name, # Use standard bucket_name logic (from env)
                 project_id,
-                content_type="application/json"
+                content_type="application/x-ndjson"
             )
         else:
             print("[WARN] Failed to fetch stock list or no data returned.")
