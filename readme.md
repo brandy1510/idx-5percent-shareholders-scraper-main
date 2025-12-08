@@ -44,6 +44,7 @@ Deploy using the following settings:
 -   **Entry Point**: `idx_scraper_entry`
 -   **Memory**: **1 GB** (Minimum) or **2 GB** (Recommended)
     -   *Why?* PDF parsing (`pdfplumber`) is memory-intensive for files with many pages. 512MB is insufficient.
+-   **CPU**: **1 vCPU** (Sufficient)
 -   **Timeout**: 300s (5 minutes)
 -   **Source**: Upload this directory.
 

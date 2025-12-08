@@ -4,6 +4,7 @@ import functions_framework
 from datetime import datetime, timedelta
 from src.idx_fetcher import fetch_idx_pdf
 from src.pdf_parser import parse_shareholder_pdf
+from src.stock_list_scraper import fetch_stock_list
 
 # Try to import GCS uploader
 try:
@@ -41,6 +42,26 @@ def get_target_date():
         print(f"Fetching data for Yesterday: {target_date.strftime('%Y-%m-%d')}")
     
     return target_date.strftime("%Y%m%d")
+
+def save_or_upload(content, local_filename, gcs_blob_path, bucket_name, project_id, content_type="text/plain"):
+    """
+    Helper to save content to local file (fallback) or upload to GCS.
+    """
+    # GCS Upload
+    if GCS_AVAILABLE and bucket_name:
+        print(f"Uploading to GCS Bucket: {bucket_name}/{gcs_blob_path}")
+        return upload_to_gcs(bucket_name, gcs_blob_path, content, content_type=content_type, project_id=project_id)
+    
+    # Local Fallback
+    local_dir = "/tmp" if os.path.exists("/tmp") else "results"
+    os.makedirs(local_dir, exist_ok=True)
+    local_path = os.path.join(local_dir, local_filename)
+    
+    with open(local_path, "w", encoding="utf-8") as f:
+        f.write(content)
+        
+    print(f"[INFO] Saved locally to {local_path}")
+    return True
 
 def run_etl(force_date=None):
     print("Starting IDX Shareholder ETL (GCF)...")
@@ -80,31 +101,50 @@ def run_etl(force_date=None):
         if full_df.empty:
             return "No data found."
 
-        # 3. Save / Upload
+        # 3. Save / Upload PDF Data
         csv_full = base_filename + "_full.csv"
-        
         full_csv_str = full_df.to_csv(index=False)
         
-        if GCS_AVAILABLE and bucket_name:
-            print(f"Uploading to GCS Bucket: {bucket_name}")
-            
-            # Upload Full Data (Raw) matches the main table definition
-            # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
-            blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
-            upload_to_gcs(bucket_name, blob_name_full, full_csv_str, project_id=project_id)
-            
-        else:
-            # Fallback for local testing or if GCS unavailable
-            # GCF 'tmp' is writable
-            local_dir = "/tmp" if os.path.exists("/tmp") else "results"
-            os.makedirs(local_dir, exist_ok=True)
-            
-            with open(os.path.join(local_dir, csv_full), "w", encoding="utf-8") as f:
-                f.write(full_csv_str)
-                
-            print(f"[INFO] No bucket configured or GCS unavailable. Saved to {local_dir}")
+        # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
+        blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
+        
+        save_or_upload(
+            full_csv_str, 
+            csv_full, 
+            blob_name_full, 
+            bucket_name, 
+            project_id, 
+            content_type="text/csv"
+        )
 
-        return f"Success. Processed {original_filename}. Rows: {len(full_df)}"
+        # 4. Fetch and Upload Stock List (Daftar Saham)
+        print("Fetching Stock List (Daftar Saham)...")
+        # Key is loaded internally by fetch_stock_list from env
+        
+        stock_list_data = fetch_stock_list()
+        
+        if stock_list_data:
+            import json
+            stock_json_str = json.dumps(stock_list_data, indent=2, ensure_ascii=False)
+            
+            # Use config for prefix
+            stock_data_prefix = os.environ.get("STOCK_DATA_PREFIX", "stock_market/data_emiten")
+            
+            stock_filename = f"idx_stock_list_{target_date_str}.json"
+            stock_blob_path = f"{stock_data_prefix}/{stock_filename}"
+            
+            save_or_upload(
+                stock_json_str,
+                stock_filename,
+                stock_blob_path,
+                bucket_name, # Use standard bucket_name logic (from env)
+                project_id,
+                content_type="application/json"
+            )
+        else:
+            print("[WARN] Failed to fetch stock list or no data returned.")
+
+        return f"Success. Processed {original_filename}. Rows: {len(full_df)}. Stock List parsed."
         
     except ValueError as ve:
         error_msg = f"No data found: {ve}"
