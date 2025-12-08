@@ -118,8 +118,7 @@ def save_to_file(data):
     # Ensure data directory exists
     os.makedirs("data", exist_ok=True)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"data/idx_stock_list_{timestamp}.json"
+    filename = "data/idx_stock_list.json"
     
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

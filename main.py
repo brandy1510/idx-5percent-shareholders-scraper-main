@@ -130,7 +130,8 @@ def run_etl(force_date=None):
             # Use config for prefix
             stock_data_prefix = os.environ.get("STOCK_DATA_PREFIX", "stock_market/data_emiten")
             
-            stock_filename = f"idx_stock_list_{target_date_str}.json"
+            # Static filename to overwrite each run
+            stock_filename = "idx_stock_list.json"
             stock_blob_path = f"{stock_data_prefix}/{stock_filename}"
             
             save_or_upload(
