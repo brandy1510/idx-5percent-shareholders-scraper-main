@@ -45,25 +45,29 @@ def get_target_date():
 
 def save_or_upload(content, local_filename, gcs_blob_path, bucket_name, project_id, content_type="text/plain"):
     """
-    Helper to save content to local file (fallback) or upload to GCS.
+    Helper to save content to local file AND upload to GCS if configured.
     """
-    # GCS Upload
+    # 1. Local Save
+    try:
+        local_dir = "results"
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, local_filename)
+        
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(content)
+            
+        print(f"[INFO] Saved locally to {local_path}")
+    except Exception as e:
+        print(f"[WARN] Failed to save locally: {e}")
+
+    # 2. GCS Upload
     if GCS_AVAILABLE and bucket_name:
         print(f"Uploading to GCS Bucket: {bucket_name}/{gcs_blob_path}")
         return upload_to_gcs(bucket_name, gcs_blob_path, content, content_type=content_type, project_id=project_id)
     
-    # Local Fallback
-    local_dir = "/tmp" if os.path.exists("/tmp") else "results"
-    os.makedirs(local_dir, exist_ok=True)
-    local_path = os.path.join(local_dir, local_filename)
-    
-    with open(local_path, "w", encoding="utf-8") as f:
-        f.write(content)
-        
-    print(f"[INFO] Saved locally to {local_path}")
     return True
 
-def run_etl(force_date=None):
+def run_etl(force_date=None, local_save_dir=None, use_scraperapi=True):
     print("Starting IDX Shareholder ETL (GCF)...")
     
     # Config
@@ -79,43 +83,65 @@ def run_etl(force_date=None):
             target_date_str = get_target_date()
             print(f"Target Date (YYYYMMDD): {target_date_str}")
         
-        # Format date for Hive Partition (dt=YYYY-MM-DD)
-        date_obj = datetime.strptime(target_date_str, "%Y%m%d")
-        partition_date = date_obj.strftime("%Y-%m-%d")
-        hive_partition = f"dt={partition_date}"
-        
-        # 1. Fetch PDF
+        # 1. Fetch PDF (Pass local params)
         print("Fetching PDF from IDX...")
-        fetch_result = fetch_idx_pdf(exact_date=target_date_str)
         
-        pdf_content = fetch_result["pdf_content"]
-        original_filename = fetch_result["fileName"]
-        base_filename = os.path.splitext(original_filename)[0]
-        
-        print(f"PDF fetched into memory. Size: {pdf_content.getbuffer().nbytes} bytes")
-        
-        # 2. Parse PDF
-        print("Parsing PDF...")
-        full_df = parse_shareholder_pdf(pdf_content)
-        
-        if full_df.empty:
-            return "No data found."
+        try:
+            fetch_results = fetch_idx_pdf(
+                exact_date=target_date_str, 
+                local_save_path=local_save_dir,
+                use_scraperapi=use_scraperapi
+            )
+        except ValueError as ve:
+            return f"No data found: {ve}"
 
-        # 3. Save / Upload PDF Data
-        csv_full = base_filename + "_full.csv"
-        full_csv_str = full_df.to_csv(index=False)
+        summary_msgs = []
         
-        # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
-        blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
-        
-        save_or_upload(
-            full_csv_str, 
-            csv_full, 
-            blob_name_full, 
-            bucket_name, 
-            project_id, 
-            content_type="text/csv"
-        )
+        for fetch_result in fetch_results:
+            pdf_content = fetch_result["pdf_content"]
+            original_filename = fetch_result["fileName"]
+            file_date_str = fetch_result["fileDate"]
+            base_filename = os.path.splitext(original_filename)[0]
+            
+            # Determine Hive Partition from FILE DATE
+            # Format date for Hive Partition (dt=YYYY-MM-DD)
+            if len(file_date_str) == 8:
+                date_obj = datetime.strptime(file_date_str, "%Y%m%d")
+                partition_date = date_obj.strftime("%Y-%m-%d")
+            else:
+                # Fallback if file date not parsed correctly
+                partition_date = fetch_result["announcementDate"][:10]
+                
+            hive_partition = f"dt={partition_date}"
+            print(f"[INFO] Using Hive Partition: {hive_partition} (from file date: {file_date_str})")
+
+            print(f"PDF processed: {original_filename}")
+            
+            # 2. Parse PDF
+            print(f"Parsing PDF {original_filename}...")
+            full_df = parse_shareholder_pdf(pdf_content)
+            
+            if full_df.empty:
+                print(f"[WARN] No data found in {original_filename}")
+                continue
+
+            # 3. Save / Upload PDF Data
+            csv_full = base_filename + "_full.csv"
+            full_csv_str = full_df.to_csv(index=False)
+            
+            # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
+            blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
+            
+            save_or_upload(
+                full_csv_str, 
+                csv_full, 
+                blob_name_full, 
+                bucket_name, 
+                project_id, 
+                content_type="text/csv"
+            )
+            
+            summary_msgs.append(f"Processed {original_filename} (Rows: {len(full_df)})")
 
         # 4. Fetch and Upload Stock List (Daftar Saham)
         print("Fetching Stock List (Daftar Saham)...")
@@ -147,7 +173,7 @@ def run_etl(force_date=None):
         else:
             print("[WARN] Failed to fetch stock list or no data returned.")
 
-        return f"Success. Processed {original_filename}. Rows: {len(full_df)}. Stock List parsed."
+        return f"Success. {'; '.join(summary_msgs)}. Stock List parsed."
         
     except ValueError as ve:
         error_msg = f"No data found: {ve}"
@@ -176,7 +202,3 @@ def idx_scraper_entry(request):
         return result, 200
     except Exception as e:
         return str(e), 500
-
-if __name__ == "__main__":
-    # Local debugging
-    run_etl()

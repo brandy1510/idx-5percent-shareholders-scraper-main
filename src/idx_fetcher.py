@@ -8,13 +8,25 @@ from curl_cffi import requests
 
 BASE_URL = "https://www.idx.co.id/primary/ListedCompany/GetAnnouncement"
 
-def fetch_idx_pdf(exact_date=None):
+def fetch_idx_pdf(exact_date=None, local_save_path=None, use_scraperapi=True):
     """
     Fetch IDX announcements filtered by 'Pemegang Saham di atas 5%' 
-    and return the attachment content as BytesIO.
+    and return the attachment content as BytesIO or file path.
     
-    Uses curl_cffi to impersonate a real browser (TLS Fingerprint) 
-    to bypass strict WAF blocking in Datacenters.
+    Args:
+        exact_date (str): YYYYMMDD date string to filter by announcement date.
+        local_save_path (str): Directory path to save PDF locally. If None, uses memory.
+        use_scraperapi (bool): Whether to use ScraperAPI or direct connection.
+    
+    Returns:
+        dict: {
+            "title": ...,
+            "announcementDate": ...,
+            "fileDate": ...,  # Extracted from filename
+            "attachmentUrl": ...,
+            "fileName": ...,
+            "pdf_content": BytesIO object or str (path)
+        }
     """
 
     today_str = datetime.today().strftime("%Y%m%d")
@@ -50,8 +62,9 @@ def fetch_idx_pdf(exact_date=None):
 
     # === Fetch data ===
     scraperapi_key = os.environ.get("SCRAPERAPI_KEY")
+    data = []
     
-    if scraperapi_key:
+    if use_scraperapi and scraperapi_key:
         print(f"[INFO] Using ScraperAPI...")
         # Construct full target URL with params manually for the 'url' param
         query_string = urllib.parse.urlencode(params)
@@ -113,6 +126,8 @@ def fetch_idx_pdf(exact_date=None):
         "TglPengumuman") or "", reverse=True)
 
     # === Find _lamp attachment ===
+    results = []
+    
     for item in data:
         pengumuman = item["pengumuman"]
         attachments = item.get("attachments", [])
@@ -123,22 +138,30 @@ def fetch_idx_pdf(exact_date=None):
             if "_lamp" not in file_name.lower():
                 continue
 
-            # --- exact mode must match date exactly ---
+            # Check exact date if filtering enabled (still check announcement date for filtering scope)
             if exact_date:
                 date_str = datetime.strptime(
                     tgl_pengumuman[:10], "%Y-%m-%d").strftime("%Y%m%d")
                 if date_str != exact_date:
                     continue
-            else:
-                date_str = datetime.strptime(
-                    tgl_pengumuman[:10], "%Y-%m-%d").strftime("%Y%m%d")
 
-            # --- Download logic (In-Memory) ---
+            # Extract date from filename
+            # Standard format assumption: 20251208_DPS5_lamp.pdf -> 20251208
+            try:
+                file_date = file_name.split('_')[0]
+                # Validate it's a date-like string (digits) and length 8
+                if not (file_date.isdigit() and len(file_date) == 8):
+                    print(f"[WARN] Filename '{file_name}' does not start with YYYYMMDD date. Using fallback.")
+                    file_date = datetime.strptime(tgl_pengumuman[:10], "%Y-%m-%d").strftime("%Y%m%d")
+            except Exception:
+                file_date = datetime.strptime(tgl_pengumuman[:10], "%Y-%m-%d").strftime("%Y%m%d")
+
+            # --- Download logic (In-Memory or Local) ---
             print(f"[INFO] Downloading {file_name} ...")
             pdf_url = attachment["FullSavePath"]
             
             # Download PDF
-            if scraperapi_key:
+            if use_scraperapi and scraperapi_key:
                 print(f"[INFO] Downloading via ScraperAPI...")
                 payload_pdf = {
                     'api_key': scraperapi_key, 
@@ -147,20 +170,41 @@ def fetch_idx_pdf(exact_date=None):
                 pdf_data = requests.get('https://api.scraperapi.com/', params=payload_pdf, timeout=120)
             else:
                 # Direct / Proxy download using the same session/impersonation
-                pdf_data = requests.get(pdf_url, proxies=proxies, impersonate="chrome110", timeout=60)
+                
+                # Setup proxy again locally just to be sure if not set above (e.g. ScraperAPI key exists but use_scraperapi=False)
+                proxy_url_env = os.environ.get("PROXY_URL")
+                proxies_local = None
+                if proxy_url_env and not proxy_url_env.startswith(("http://", "https://")):
+                    proxy_url_env = f"http://{proxy_url_env}"
+                if proxy_url_env:
+                    proxies_local = {"http": proxy_url_env, "https": proxy_url_env}
+                
+                pdf_data = requests.get(pdf_url, proxies=proxies_local, impersonate="chrome110", timeout=60)
             
             pdf_data.raise_for_status()
             
-            # Create BytesIO object
-            pdf_buffer = io.BytesIO(pdf_data.content)
-            print(f"[SUCCESS] Downloaded to memory.")
+            if local_save_path:
+                os.makedirs(local_save_path, exist_ok=True)
+                full_path = os.path.join(local_save_path, file_name)
+                with open(full_path, "wb") as f:
+                    f.write(pdf_data.content)
+                print(f"[SUCCESS] Saved locally to {full_path}")
+                pdf_content = full_path
+            else:
+                # Create BytesIO object
+                pdf_content = io.BytesIO(pdf_data.content)
+                print(f"[SUCCESS] Downloaded to memory.")
 
-            return {
+            results.append({
                 "title": pengumuman.get("JudulPengumuman"),
                 "announcementDate": tgl_pengumuman,
+                "fileDate": file_date,
                 "attachmentUrl": attachment.get("FullSavePath"),
                 "fileName": file_name,
-                "pdf_content": pdf_buffer
-            }
+                "pdf_content": pdf_content
+            })
+            
+    if results:
+        return results
 
     raise ValueError("No '_lamp' attachment found for the given parameters")

@@ -70,25 +70,46 @@ def process_date(date_str):
     """
     print(f"\n[BACKFILL] Processing Date: {date_str} ...")
     try:
-        result = run_etl(force_date=date_str)
+        # User requested: local save + GCS upload.
+        # run_etl will call save_or_upload, which now does BOTH local (results/) and GCS.
+        # But we also want PDFs in src/downloads.
+        result = run_etl(
+            force_date=date_str, 
+            local_save_dir="src/downloads", 
+            use_scraperapi=False # User requested: "not using the scraperapi when we run local testing" -> assume applies here too?
+            # Or maybe they want real run? "store result locally then the final result push to Google Cloud Storage"
+            # If pushing to GCS, maybe we want reliable data?
+            # User said "store result locally then the final result push to Google Cloud Storage"
+            # User previously said: "not using the scraperapi when we run local testing"
+            # I'll stick to use_scraperapi=False for now to save credits as per previous pattern, unless it fails.
+        )
         print(f"> {date_str}: {result}")
         return f"{date_str}: Success"
     except Exception as e:
         print(f"> {date_str}: Failed or No Data: {e}")
         return f"{date_str}: Failed"
 
-def run_backfill(start_date, end_date):
+def run_backfill(start_date, end_date, max_workers=5):
     """
     Scenario 3: Backfill data from start_date to end_date.
-    Uses multi-threading (max 3 threads) to process days in parallel.
+    Uses multi-threading to process days in parallel.
     """
-    print(f"--- [TEST] Backfill Mode ({start_date} to {end_date}) ---")
+    print(f"--- [TEST] Backfill Mode ({start_date} to {end_date}, Workers: {max_workers}) ---")
     
     try:
-        start = datetime.strptime(start_date, "%Y%m%d")
-        end = datetime.strptime(end_date, "%Y%m%d")
+        # Supported formats: YYYYMMDD or YYYY-MM-DD
+        if "-" in start_date:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+        else:
+            start = datetime.strptime(start_date, "%Y%m%d")
+            
+        if "-" in end_date:
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            end = datetime.strptime(end_date, "%Y%m%d")
+            
     except ValueError:
-        print("[ERROR] Invalid date format. Please use YYYYMMDD.")
+        print("[ERROR] Invalid date format. Please use YYYYMMDD or YYYY-MM-DD.")
         return
 
     # Generate list of dates
@@ -98,10 +119,10 @@ def run_backfill(start_date, end_date):
         date_list.append(current.strftime("%Y%m%d"))
         current += timedelta(days=1)
         
-    print(f"[INFO] Queuing {len(date_list)} dates with 3 threads...")
+    print(f"[INFO] Queuing {len(date_list)} dates with {max_workers} threads...")
 
     # Run with ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         executor.map(process_date, date_list)
 
 def list_downloaded_pdfs():
@@ -117,6 +138,8 @@ def main():
     parser.add_argument("--file", help="Path to PDF file for parse mode (optional)")
     parser.add_argument("--start_date", help="YYYYMMDD Start date for backfill")
     parser.add_argument("--end_date", help="YYYYMMDD End date for backfill")
+    
+    parser.add_argument("--threads", type=int, default=5, help="Number of threads for backfill")
     
     args = parser.parse_args()
 
@@ -140,13 +163,13 @@ def main():
         
     elif args.mode == "full":
         print("--- [TEST] Full End-to-End Flow ---")
-        run_etl()
+        run_etl(local_save_dir="src/downloads", use_scraperapi=False)
         
     elif args.mode == "backfill":
         if not args.start_date or not args.end_date:
             print("[ERROR] --start_date and --end_date are required for backfill mode.")
             return
-        run_backfill(args.start_date, args.end_date)
+        run_backfill(args.start_date, args.end_date, args.threads)
 
 if __name__ == "__main__":
     main()
