@@ -5,10 +5,10 @@ import urllib.parse
 import requests 
 from datetime import datetime
 
-def fetch_stock_list(api_key=None):
+def fetch_stock_list(api_key=None, use_scraperapi=True):
     """
     Fetches the list of all stocks from IDX using the GetCompanyProfiles endpoint.
-    Uses ScraperAPI if SCRAPERAPI_KEY is found in env or passed as arg.
+    Uses ScraperAPI if SCRAPERAPI_KEY is found in env (or passed as arg) AND use_scraperapi is True.
     """
     if not api_key:
         api_key = os.environ.get("SCRAPERAPI_KEY")
@@ -37,39 +37,25 @@ def fetch_stock_list(api_key=None):
     
     print(f"[INFO] Fetching stock list from {base_url}...")
     
+    # Import helper inside function or top level. Top level is better but doing here to minimize large diffs if desired.
+    # But clean code suggests top level. I will assuming I can add import at top or just use it here if I modify imports.
+    from src.request_helper import make_request
+    
     all_profiles = []
     
     while True:
         try:
-            # Construct target URL with params for the current page
-            # We must manually encode params into the URL string if using ScraperAPI
-            # because ScraperAPI needs the full 'url' param.
+            # We don't need to manually construct ScraperAPI payloads anymore.
+            # Just pass the idx_params and let make_request handle it.
             
-            if api_key:
-                # ScraperAPI mode
-                query_string = urllib.parse.urlencode(idx_params)
-                target_url = f"{base_url}?{query_string}"
-                
-                payload = {
-                    'api_key': api_key,
-                    'url': target_url
-                }
-                
-                # print(f"[DEBUG] Requesting via ScraperAPI: {target_url}")
-                response = requests.get('https://api.scraperapi.com/', params=payload, timeout=60)
-                
-            else:
-                # Direct mode (likely to fail WAF without curl_cffi or if IP is blocked)
-                print("[WARN] No API Key provided, trying direct connection...")
-                response = requests.get(
-                    base_url, 
-                    params=idx_params, 
-                    headers=headers, 
-                    timeout=30
-                )
+            response = make_request(
+                target_url=base_url,
+                params=idx_params,
+                headers=headers,
+                use_api=use_scraperapi,
+                timeout=60
+            )
 
-            response.raise_for_status()
-            
             # ScraperAPI sometimes returns 200 with error text if the target failed, 
             # but usually it relays status. 
             # IDX returns JSON.

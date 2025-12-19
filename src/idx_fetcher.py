@@ -61,63 +61,35 @@ def fetch_idx_pdf(exact_date=None, local_save_path=None, use_scraperapi=True):
         }
 
     # === Fetch data ===
-    scraperapi_key = os.environ.get("SCRAPERAPI_KEY")
-    data = []
+    # === Fetch data ===
+    # Use request_helper to handle API/Direct logic
+    from src.request_helper import make_request
     
-    if use_scraperapi and scraperapi_key:
-        print(f"[INFO] Using ScraperAPI...")
-        # Construct full target URL with params manually for the 'url' param
-        query_string = urllib.parse.urlencode(params)
-        target_url = f"{BASE_URL}?{query_string}"
-        
-        payload = {
-            'api_key': scraperapi_key, 
-            'url': target_url
-        }
-        
-        try:
-            # We can use curl_cffi requests as standard requests here
-            response = requests.get('https://api.scraperapi.com/', params=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json().get("Replies", [])
-        except Exception as e:
-            raise RuntimeError(f"ScraperAPI Failed: {e}")
-            
-    else:
-        # Fallback to direct connection / Proxy / TLS Impersonation
-        # === Fetch data with curl_cffi (J3 Fingerprint Impersonation) ===
-        # Using 'chrome110' impersonation to match recent browser TLS signatures
-        proxy_url = os.environ.get("PROXY_URL")
-        if proxy_url and not proxy_url.startswith(("http://", "https://")):
-            proxy_url = f"http://{proxy_url}"
-    
-        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
-        
-        if proxy_url:
-            print(f"[INFO] Using Proxy: {proxy_url}")
-        
-        print(f"[INFO] Fetching from: {BASE_URL} with params: {params} (using curl_cffi)")
-        
-        try:
-            response = requests.get(
-                BASE_URL, 
-                params=params, 
-                proxies=proxies,
-                impersonate="chrome110",
-                headers={
-                    "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
-                    "Origin": "https://www.idx.co.id",
-                    "Accept": "application/json, text/javascript, */*; q=0.01",
-                    "X-Requested-With": "XMLHttpRequest"
-                },
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            data = response.json().get("Replies", [])
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch IDX data (WAF Blocked?): {e}")
+    headers = {
+        "Referer": "https://www.idx.co.id/primary/ListedCompany/Index",
+        "Origin": "https://www.idx.co.id",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest"
+    }
 
+    try:
+        response = make_request(
+            target_url=BASE_URL,
+            params=params,
+            headers=headers,
+            use_api=use_scraperapi,
+            timeout=60 # Increased from 30 to 60 for slower proxies
+        )
+        response.raise_for_status()
+        try:
+            data = response.json().get("Replies", [])
+        except Exception as e:
+            print(f"[ERROR] JSON Decode Failed. Response Text (first 500 chars): {response.text[:500]}")
+            raise e
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch IDX data: {e}")
+            
     if not data:
         raise ValueError("No announcements found for the given parameters")
 
@@ -160,26 +132,17 @@ def fetch_idx_pdf(exact_date=None, local_save_path=None, use_scraperapi=True):
             print(f"[INFO] Downloading {file_name} ...")
             pdf_url = attachment["FullSavePath"]
             
-            # Download PDF
-            if use_scraperapi and scraperapi_key:
-                print(f"[INFO] Downloading via ScraperAPI...")
-                payload_pdf = {
-                    'api_key': scraperapi_key, 
-                    'url': pdf_url
-                }
-                pdf_data = requests.get('https://api.scraperapi.com/', params=payload_pdf, timeout=120)
-            else:
-                # Direct / Proxy download using the same session/impersonation
-                
-                # Setup proxy again locally just to be sure if not set above (e.g. ScraperAPI key exists but use_scraperapi=False)
-                proxy_url_env = os.environ.get("PROXY_URL")
-                proxies_local = None
-                if proxy_url_env and not proxy_url_env.startswith(("http://", "https://")):
-                    proxy_url_env = f"http://{proxy_url_env}"
-                if proxy_url_env:
-                    proxies_local = {"http": proxy_url_env, "https": proxy_url_env}
-                
-                pdf_data = requests.get(pdf_url, proxies=proxies_local, impersonate="chrome110", timeout=60)
+            # Use request_helper for PDF download
+            try:
+                pdf_data = make_request(
+                    target_url=pdf_url,
+                    use_api=use_scraperapi,
+                    timeout=120
+                )
+                pdf_data.raise_for_status()
+            except Exception as e:
+                print(f"[ERROR] Failed to download PDF {file_name}: {e}")
+                continue
             
             pdf_data.raise_for_status()
             

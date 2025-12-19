@@ -42,26 +42,78 @@ def parse_shareholder_pdf(pdf_file, log_callback=None) -> tuple[pd.DataFrame, pd
             final_header = []
             i = 0
             while i < len(header):
-                h = (header[i] or "").strip()
-                if "kepemilikan per" in h.lower():
-                    # extract date like 29-OCT-2025
-                    m = re.search(r"(\d{1,2}-[A-Z]{3}-\d{4})", h)
-                    date_str = m.group(1) if m else ""
+                # Clean Header Cell:
+                # Issue: Sometimes previous content (like page numbers or previous row) 
+                # gets merged into the header (e.g., "1766\nNo").
+                # Solution: Split by newline and take the last non-empty part?
+                # Or specifically look for known header keywords?
+                # "No", "Nama Emiten" are usually at the bottom.
+                
+                raw_h = str(header[i] or "").strip()
+                
+                # Simple heuristic: Take the last line if multiline
+                if "\n" in raw_h:
+                    parts = raw_h.split("\n")
+                    h = parts[-1].strip()
+                    # Fallback: if last part is empty or too short?
+                    if not h and len(parts) > 1:
+                        h = parts[-2].strip()
+                else:
+                    h = raw_h
+
+                # Check for Date Pattern (DD-MMM-YYYY)
+                # Note: The garbled date header usually contains the date in the string somewhere
+                # "Kepe9m... 15-DEC-2025 ..." -> regex finds 15-DEC-2025
+                m = re.search(r"(\d{1,2}-[A-Z]{3}-\d{4})", h.upper())
+                
+                # If regex failed on clean 'h', try 'raw_h' just in case the date was in top line?
+                # Unlikely, usually date is in the main header text.
+                if not m:
+                     m = re.search(r"(\d{1,2}-[A-Z]{3}-\d{4})", raw_h.upper())
+
+                if m:
+                    # Found a date-based column triplet (Kepemilikan Per X)
+                    date_str = m.group(1)
                     final_header.extend([
                         f"Kepemilikan Per {date_str} - Jumlah Saham",
                         f"Kepemilikan Per {date_str} - Saham Gabungan Per Investor",
                         f"Kepemilikan Per {date_str} - Persentase Kepemilikan Per Investor (%)"
                     ])
-                    i += 3  # skip 3 columns
+                    
+                    # Logic to determine how many input columns to consume:
+                    # If this was a merged cell, we consume 1.
+                    # If this was standard (Text, None, None), we consume 3.
+                    skip = 1
+                    # Check next cell
+                    if i + 1 < len(header) and not (header[i+1] or "").strip():
+                        skip += 1
+                        # Check next-next cell
+                        if i + 2 < len(header) and not (header[i+2] or "").strip():
+                            skip += 1
+                    
+                    i += skip
                 else:
                     if h:
                         final_header.append(h)
+                    else:
+                        # Empty header cell not associated with date expansion?
+                        # Usually we skip, or append "Unnamed"?
+                        # Based on original logic: "if h: final_header.append(h)"
+                        # So we skip empty non-date headers. (Assuming they are merged parts of previous?)
+                        pass 
                     i += 1
 
             all_rows.extend(data)
 
     # Create DataFrame
-    df = pd.DataFrame(all_rows, columns=final_header)
+    try:
+        df = pd.DataFrame(all_rows, columns=final_header)
+    except ValueError as e:
+        if all_rows:
+            print(f"[ERROR] DataFrame Creation Failed. Header Len: {len(final_header)}, First Row Len: {len(all_rows[0])}")
+            # print(f"Header: {final_header}")
+            # print(f"First Row: {all_rows[0]}")
+        raise e
     
     # --- Data Cleaning & Filling ---
     # 2. Drop Header rows (recurring on every page)

@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta
 
 # Add root directory to path so we can import src
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.idx_fetcher import fetch_idx_pdf
 from src.pdf_parser import parse_shareholder_pdf
@@ -14,25 +14,32 @@ def ensure_dirs():
     os.makedirs("downloads", exist_ok=True)
     os.makedirs("results", exist_ok=True)
 
-def test_fetch(date=None):
+def test_fetch(date=None, use_scraperapi=False):
     """
     Scenario 1: Fetch PDF from IDX and save to downloads/
     """
-    print(f"--- [TEST] Fetch Mode (Date: {date}) ---")
+    mode_str = "ScraperAPI" if use_scraperapi else "Local Network"
+    print(f"--- [TEST] Fetch Mode (Date: {date}, Mode: {mode_str}) ---")
     try:
-        result = fetch_idx_pdf(exact_date=date)
-        filename = result["fileName"]
-        content = result["pdf_content"]
-        
-        save_path = os.path.join("downloads", filename)
-        with open(save_path, "wb") as f:
-            f.write(content.getvalue())
+        result = fetch_idx_pdf(exact_date=date, local_save_path="downloads", use_scraperapi=use_scraperapi)
+        # fetch_idx_pdf returns a list now
+        if not result:
+            print("[WARN] No results found.")
+            return
+
+        for res in result:
+            filename = res["fileName"]
+            # It's already saved if local_save_path is passed, but let's confirm
+            # fetch_idx_pdf saves it.
+            # actually fetch_idx_pdf saves it if local_save_path is provided.
+            # We don't need to write it again if fetch_idx_pdf did it.
+            # But let's check how fetch_idx_pdf behaves. 
+            # It writes to `metrics/downloads` equivalent? No, it takes `local_save_path`.
+            # If we passed "downloads", it saved there.
+            print(f"[SUCCESS] Processed: {filename}")
             
-        print(f"[SUCCESS] PDF saved to: {save_path}")
-        return save_path
     except Exception as e:
         print(f"[ERROR] Fetch failed: {e}")
-        return None
 
 def test_parse(file_path):
     """
@@ -64,24 +71,19 @@ def test_parse(file_path):
 
 import concurrent.futures
 
-def process_date(date_str):
+def process_date(date_str, fetch_pdfs=True, fetch_stocks=True, use_scraperapi=False):
     """
     Helper function to process a single date for backfill.
     """
-    print(f"\n[BACKFILL] Processing Date: {date_str} ...")
+    mode_str = "ScraperAPI" if use_scraperapi else "Local Network"
+    print(f"\n[BACKFILL] Processing Date: {date_str} (PDFs: {fetch_pdfs}, Stocks: {fetch_stocks}, Mode: {mode_str}) ...")
     try:
-        # User requested: local save + GCS upload.
-        # run_etl will call save_or_upload, which now does BOTH local (results/) and GCS.
-        # But we also want PDFs in src/downloads.
         result = run_etl(
             force_date=date_str, 
             local_save_dir="src/downloads", 
-            use_scraperapi=False # User requested: "not using the scraperapi when we run local testing" -> assume applies here too?
-            # Or maybe they want real run? "store result locally then the final result push to Google Cloud Storage"
-            # If pushing to GCS, maybe we want reliable data?
-            # User said "store result locally then the final result push to Google Cloud Storage"
-            # User previously said: "not using the scraperapi when we run local testing"
-            # I'll stick to use_scraperapi=False for now to save credits as per previous pattern, unless it fails.
+            use_scraperapi=use_scraperapi,
+            fetch_pdfs=fetch_pdfs,
+            fetch_stocks=fetch_stocks
         )
         print(f"> {date_str}: {result}")
         return f"{date_str}: Success"
@@ -89,12 +91,14 @@ def process_date(date_str):
         print(f"> {date_str}: Failed or No Data: {e}")
         return f"{date_str}: Failed"
 
-def run_backfill(start_date, end_date, max_workers=5):
+def run_backfill(start_date, end_date, max_workers=5, step="all", use_scraperapi=False):
     """
     Scenario 3: Backfill data from start_date to end_date.
     Uses multi-threading to process days in parallel.
+    Step: 'all', 'pdf', 'stock'
     """
-    print(f"--- [TEST] Backfill Mode ({start_date} to {end_date}, Workers: {max_workers}) ---")
+    mode_str = "ScraperAPI" if use_scraperapi else "Local Network"
+    print(f"--- [TEST] Backfill Mode ({start_date} to {end_date}, Workers: {max_workers}, Step: {step}, Mode: {mode_str}) ---")
     
     try:
         # Supported formats: YYYYMMDD or YYYY-MM-DD
@@ -121,9 +125,22 @@ def run_backfill(start_date, end_date, max_workers=5):
         
     print(f"[INFO] Queuing {len(date_list)} dates with {max_workers} threads...")
 
+    # Create a partial function or lambda to pass extra args to process_date
+    from functools import partial
+    
+    fetch_pdfs = True
+    fetch_stocks = True
+    
+    if step == "pdf":
+        fetch_stocks = False
+    elif step == "stock":
+        fetch_pdfs = False
+        
+    process_func = partial(process_date, fetch_pdfs=fetch_pdfs, fetch_stocks=fetch_stocks, use_scraperapi=use_scraperapi)
+
     # Run with ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        executor.map(process_date, date_list)
+        executor.map(process_func, date_list)
 
 def list_downloaded_pdfs():
     pdfs = [f for f in os.listdir("downloads") if f.lower().endswith(".pdf")]
@@ -140,11 +157,13 @@ def main():
     parser.add_argument("--end_date", help="YYYYMMDD End date for backfill")
     
     parser.add_argument("--threads", type=int, default=5, help="Number of threads for backfill")
+    parser.add_argument("--step", choices=["all", "pdf", "stock"], default="all", help="Which step to run: all, pdf (only PDFs), or stock (only Stock List)")
+    parser.add_argument("--use-api", action="store_true", help="Use ScraperAPI (charges credits). Default is False (Local Network).")
     
     args = parser.parse_args()
 
     if args.mode == "fetch":
-        test_fetch(args.date)
+        test_fetch(args.date, use_scraperapi=args.use_api)
         
     elif args.mode == "parse":
         target_file = args.file
@@ -162,14 +181,14 @@ def main():
         test_parse(target_file)
         
     elif args.mode == "full":
-        print("--- [TEST] Full End-to-End Flow ---")
-        run_etl(local_save_dir="src/downloads", use_scraperapi=False)
+        print(f"--- [TEST] Full End-to-End Flow (ScraperAPI: {args.use_api}) ---")
+        run_etl(local_save_dir="src/downloads", use_scraperapi=args.use_api)
         
     elif args.mode == "backfill":
         if not args.start_date or not args.end_date:
             print("[ERROR] --start_date and --end_date are required for backfill mode.")
             return
-        run_backfill(args.start_date, args.end_date, args.threads)
+        run_backfill(args.start_date, args.end_date, args.threads, step=args.step, use_scraperapi=args.use_api)
 
 if __name__ == "__main__":
     main()

@@ -67,13 +67,15 @@ def save_or_upload(content, local_filename, gcs_blob_path, bucket_name, project_
     
     return True
 
-def run_etl(force_date=None, local_save_dir=None, use_scraperapi=True):
+def run_etl(force_date=None, local_save_dir=None, use_scraperapi=True, fetch_pdfs=True, fetch_stocks=True):
     print("Starting IDX Shareholder ETL (GCF)...")
     
     # Config
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
     bucket_name = os.environ.get("BUCKET_NAME")
     base_prefix = os.environ.get("GCS_BASE_PREFIX", "shareholder_data")
+    
+    summary_msgs = []
     
     try:
         if force_date:
@@ -84,96 +86,102 @@ def run_etl(force_date=None, local_save_dir=None, use_scraperapi=True):
             print(f"Target Date (YYYYMMDD): {target_date_str}")
         
         # 1. Fetch PDF (Pass local params)
-        print("Fetching PDF from IDX...")
-        
-        try:
-            fetch_results = fetch_idx_pdf(
-                exact_date=target_date_str, 
-                local_save_path=local_save_dir,
-                use_scraperapi=use_scraperapi
-            )
-        except ValueError as ve:
-            return f"No data found: {ve}"
-
-        summary_msgs = []
-        
-        for fetch_result in fetch_results:
-            pdf_content = fetch_result["pdf_content"]
-            original_filename = fetch_result["fileName"]
-            file_date_str = fetch_result["fileDate"]
-            base_filename = os.path.splitext(original_filename)[0]
+        if fetch_pdfs:
+            print("Fetching PDF from IDX...")
             
-            # Determine Hive Partition from FILE DATE
-            # Format date for Hive Partition (dt=YYYY-MM-DD)
-            if len(file_date_str) == 8:
-                date_obj = datetime.strptime(file_date_str, "%Y%m%d")
-                partition_date = date_obj.strftime("%Y-%m-%d")
-            else:
-                # Fallback if file date not parsed correctly
-                partition_date = fetch_result["announcementDate"][:10]
+            try:
+                fetch_results = fetch_idx_pdf(
+                    exact_date=target_date_str, 
+                    local_save_path=local_save_dir,
+                    use_scraperapi=use_scraperapi
+                )
+            except ValueError as ve:
+                print(f"No PDF data found: {ve}")
+                fetch_results = []
+    
+            for fetch_result in fetch_results:
+                pdf_content = fetch_result["pdf_content"]
+                original_filename = fetch_result["fileName"]
+                file_date_str = fetch_result["fileDate"]
+                base_filename = os.path.splitext(original_filename)[0]
                 
-            hive_partition = f"dt={partition_date}"
-            print(f"[INFO] Using Hive Partition: {hive_partition} (from file date: {file_date_str})")
-
-            print(f"PDF processed: {original_filename}")
-            
-            # 2. Parse PDF
-            print(f"Parsing PDF {original_filename}...")
-            full_df = parse_shareholder_pdf(pdf_content)
-            
-            if full_df.empty:
-                print(f"[WARN] No data found in {original_filename}")
-                continue
-
-            # 3. Save / Upload PDF Data
-            csv_full = base_filename + "_full.csv"
-            full_csv_str = full_df.to_csv(index=False)
-            
-            # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
-            blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
-            
-            save_or_upload(
-                full_csv_str, 
-                csv_full, 
-                blob_name_full, 
-                bucket_name, 
-                project_id, 
-                content_type="text/csv"
-            )
-            
-            summary_msgs.append(f"Processed {original_filename} (Rows: {len(full_df)})")
+                # Determine Hive Partition from FILE DATE
+                # Format date for Hive Partition (dt=YYYY-MM-DD)
+                if len(file_date_str) == 8:
+                    date_obj = datetime.strptime(file_date_str, "%Y%m%d")
+                    partition_date = date_obj.strftime("%Y-%m-%d")
+                else:
+                    # Fallback if file date not parsed correctly
+                    partition_date = fetch_result["announcementDate"][:10]
+                    
+                hive_partition = f"dt={partition_date}"
+                print(f"[INFO] Using Hive Partition: {hive_partition} (from file date: {file_date_str})")
+    
+                print(f"PDF processed: {original_filename}")
+                
+                # 2. Parse PDF
+                print(f"Parsing PDF {original_filename}...")
+                full_df = parse_shareholder_pdf(pdf_content)
+                
+                if full_df.empty:
+                    print(f"[WARN] No data found in {original_filename}")
+                    continue
+    
+                # 3. Save / Upload PDF Data
+                csv_full = base_filename + "_full.csv"
+                full_csv_str = full_df.to_csv(index=False)
+                
+                # Path: stock_market/data_kepentingan/dt=YYYY-MM-DD/filename_full.csv
+                blob_name_full = f"{base_prefix}/{hive_partition}/{csv_full}"
+                
+                save_or_upload(
+                    full_csv_str, 
+                    csv_full, 
+                    blob_name_full, 
+                    bucket_name, 
+                    project_id, 
+                    content_type="text/csv"
+                )
+                
+                summary_msgs.append(f"Processed {original_filename} (Rows: {len(full_df)})")
+        else:
+            print("Skipping PDF Fetch/Parse (fetch_pdfs=False)")
 
         # 4. Fetch and Upload Stock List (Daftar Saham)
-        print("Fetching Stock List (Daftar Saham)...")
-        # Key is loaded internally by fetch_stock_list from env
-        
-        stock_list_data = fetch_stock_list()
-        
-        if stock_list_data:
-            import json
-            # Convert to NDJSON (Newline Delimited JSON)
-            # Dump each dict to a string, then join with newlines
-            stock_json_str = "\n".join([json.dumps(record, ensure_ascii=False) for record in stock_list_data])
+        if fetch_stocks:
+            print("Fetching Stock List (Daftar Saham)...")
+            # Key is loaded internally by fetch_stock_list from env
             
-            # Use config for prefix
-            stock_data_prefix = os.environ.get("STOCK_DATA_PREFIX", "stock_market/data_emiten")
+            stock_list_data = fetch_stock_list(use_scraperapi=use_scraperapi)
             
-            # Static filename to overwrite each run
-            stock_filename = "idx_stock_list.json"
-            stock_blob_path = f"{stock_data_prefix}/{stock_filename}"
-            
-            save_or_upload(
-                stock_json_str,
-                stock_filename,
-                stock_blob_path,
-                bucket_name, # Use standard bucket_name logic (from env)
-                project_id,
-                content_type="application/x-ndjson"
-            )
+            if stock_list_data:
+                import json
+                # Convert to NDJSON (Newline Delimited JSON)
+                # Dump each dict to a string, then join with newlines
+                stock_json_str = "\n".join([json.dumps(record, ensure_ascii=False) for record in stock_list_data])
+                
+                # Use config for prefix
+                stock_data_prefix = os.environ.get("STOCK_DATA_PREFIX", "stock_market/data_emiten")
+                
+                # Static filename to overwrite each run
+                stock_filename = "idx_stock_list.json"
+                stock_blob_path = f"{stock_data_prefix}/{stock_filename}"
+                
+                save_or_upload(
+                    stock_json_str,
+                    stock_filename,
+                    stock_blob_path,
+                    bucket_name, # Use standard bucket_name logic (from env)
+                    project_id,
+                    content_type="application/x-ndjson"
+                )
+                summary_msgs.append("Stock List parsed")
+            else:
+                print("[WARN] Failed to fetch stock list or no data returned.")
         else:
-            print("[WARN] Failed to fetch stock list or no data returned.")
+            print("Skipping Stock List Fetch (fetch_stocks=False)")
 
-        return f"Success. {'; '.join(summary_msgs)}. Stock List parsed."
+        return f"Success. {'; '.join(summary_msgs)}."
         
     except ValueError as ve:
         error_msg = f"No data found: {ve}"
